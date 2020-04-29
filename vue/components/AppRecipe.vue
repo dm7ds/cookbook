@@ -58,7 +58,7 @@ import RecipeTimer from './RecipeTimer'
 import RecipeTool from './RecipeTool'
 
 export default {
-
+    name: 'AppRecipe',
     components: {
         RecipeControls,
         RecipeImages,
