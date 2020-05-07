@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "build": "node node_modules/webpack/bin/webpack.js --progress --hide-modules --config webpack.build.js",
-    "devel": "node node_modules/webpack/bin/webpack.js --progress --watch --config webpack.devel.js",
+    "dev": "node node_modules/webpack/bin/webpack.js --progress --watch --config webpack.devel.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
