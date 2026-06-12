@@ -410,8 +410,25 @@ class RecipeDb {
 			if (!array_key_exists($recipe['recipe_id'], $recipesGroupedTags)) {
 				$recipesGroupedTags[$recipe['recipe_id']] = $recipe;
 			} else {
+				// Deduplicated keyword grouping
 				if (!is_null($recipe['keywords'])) {
-					$recipesGroupedTags[$recipe['recipe_id']]['keywords'] .= ',' . $recipe['keywords'];
+					$existing = $recipesGroupedTags[$recipe['recipe_id']]['keywords'] ?? '';
+					$existingArr = $existing ? explode(',', $existing) : [];
+					if (!in_array($recipe['keywords'], $existingArr)) {
+						$recipesGroupedTags[$recipe['recipe_id']]['keywords'] .= ',' . $recipe['keywords'];
+					}
+				}
+				// Deduplicated category grouping (multi-category support)
+				if (isset($recipe['category']) && !is_null($recipe['category'])) {
+					$existing = $recipesGroupedTags[$recipe['recipe_id']]['category'] ?? '';
+					if (empty($existing)) {
+						$recipesGroupedTags[$recipe['recipe_id']]['category'] = $recipe['category'];
+					} else {
+						$existingArr = explode(',', $existing);
+						if (!in_array($recipe['category'], $existingArr)) {
+							$recipesGroupedTags[$recipe['recipe_id']]['category'] .= ',' . $recipe['category'];
+						}
+					}
 				}
 			}
 		}
@@ -594,6 +611,28 @@ class RecipeDb {
 		}
 	}
 
+	/**
+	 * Get all categories of a recipe as array (multi-category support).
+	 */
+	public function getCategoriesOfRecipe(int $recipeId, string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+
+		$qb->select('name')
+			->from(self::DB_TABLE_CATEGORIES)
+			->where('recipe_id = :rid', 'user_id = :uid');
+
+		$qb->setParameter('rid', $recipeId);
+		$qb->setParameter('uid', $userId);
+
+		$cursor = $qb->executeQuery();
+		$result = $cursor->fetchAll();
+		$cursor->closeCursor();
+
+		return array_map(function ($row) {
+			return $row['name'];
+		}, $result);
+	}
+
 	public function updateCategoryOfRecipe(int $recipeId, string $categoryName, string $userId) {
 		$qb = $this->db->getQueryBuilder();
 		$qb->update(self::DB_TABLE_CATEGORIES)
@@ -658,6 +697,55 @@ class RecipeDb {
 				// The insertion of a keyword might conflict with the requirements. Skip it.
 			}
 		}
+	}
+
+	/**
+	 * Add multiple category rows (multi-category support).
+	 */
+	public function addCategoryPairs(array $pairs, string $userId) {
+		if (empty($pairs)) {
+			return;
+		}
+
+		$qb = $this->db->getQueryBuilder();
+		$qb->insert(self::DB_TABLE_CATEGORIES)
+			->values(['recipe_id' => ':rid', 'name' => ':name', 'user_id' => ':user']);
+		$qb->setParameter('user', $userId, Types::STRING);
+
+		foreach ($pairs as $p) {
+			$qb->setParameter('rid', $p['recipeId'], Types::INTEGER);
+			$qb->setParameter('name', $p['name'], Types::STRING);
+
+			try {
+				$qb->executeStatement();
+			} catch (\Exception $ex) {
+				// Skip conflicts
+			}
+		}
+	}
+
+	/**
+	 * Remove specific category rows (multi-category support).
+	 */
+	public function removeCategoryPairs(array $pairs, string $userId) {
+		if (empty($pairs)) {
+			return;
+		}
+
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete(self::DB_TABLE_CATEGORIES);
+
+		foreach ($pairs as $p) {
+			$qb->orWhere(
+				$qb->expr()->andX(
+					$qb->expr()->eq('user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)),
+					$qb->expr()->eq('recipe_id', $qb->createNamedParameter($p['recipeId'], IQueryBuilder::PARAM_INT)),
+					$qb->expr()->eq('name', $qb->createNamedParameter($p['name'], IQueryBuilder::PARAM_STR))
+				)
+			);
+		}
+
+		$qb->executeStatement();
 	}
 
 	public function removeKeywordPairs(array $pairs, string $userId) {

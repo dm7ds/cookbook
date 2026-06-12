@@ -45,11 +45,11 @@
             />
             <EditMultiselect
                 v-model="recipe['recipeCategory']"
-                :field-label="t('cookbook', 'Category')"
-                :placeholder="t('cookbook', 'Choose category')"
+                :field-label="t('cookbook', 'Categories')"
+                :placeholder="t('cookbook', 'Choose categories')"
                 :options="allCategories"
                 :taggable="true"
-                :multiple="false"
+                :multiple="true"
                 :loading="isFetchingCategories"
                 @tag="addCategory"
             />
@@ -205,7 +205,7 @@ const recipe = ref({
     prepTime: '',
     cookTime: '',
     totalTime: '',
-    recipeCategory: '',
+    recipeCategory: [],
     keywords: '',
     recipeYield: '',
     tool: [],
@@ -342,7 +342,12 @@ const overlayVisible = computed(
         store.state.loadingRecipe ||
         store.state.reloadingRecipe ||
         (store.state.categoryUpdating &&
-            store.state.categoryUpdating === recipe.value.recipeCategory),
+            (Array.isArray(recipe.value.recipeCategory)
+                ? recipe.value.recipeCategory.includes(
+                      store.state.categoryUpdating,
+                  )
+                : store.state.categoryUpdating ===
+                  recipe.value.recipeCategory)),
 );
 const recipeWithoutValueInit = computed(() => {
     const r = { ...recipe.value };
@@ -412,7 +417,10 @@ watch(
  */
 const addCategory = (newCategory) => {
     allCategories.value.push(newCategory);
-    recipe.value.recipeCategory = newCategory;
+    if (!Array.isArray(recipe.value.recipeCategory)) {
+        recipe.value.recipeCategory = [];
+    }
+    recipe.value.recipeCategory.push(newCategory);
 };
 /**
  * Add newly created keyword.
@@ -546,7 +554,7 @@ const initEmptyRecipe = () => {
         prepTime: '',
         cookTime: '',
         totalTime: '',
-        recipeCategory: '',
+        recipeCategory: [],
         keywords: '',
         recipeYield: '',
         tool: [],
@@ -625,10 +633,22 @@ const setup = async () => {
             }
         });
 
-        // fallback if fetching all categories fails
-        if (!allCategories.value.includes(recipe.value.recipeCategory)) {
-            allCategories.value.push(recipe.value.recipeCategory);
+        // Normalize recipeCategory to array (API returns comma-separated string)
+        if (typeof recipe.value.recipeCategory === 'string') {
+            recipe.value.recipeCategory = recipe.value.recipeCategory
+                .split(',')
+                .map((c) => c.trim())
+                .filter((c) => c !== '');
+        } else if (!Array.isArray(recipe.value.recipeCategory)) {
+            recipe.value.recipeCategory = [];
         }
+
+        // fallback if fetching all categories fails
+        recipe.value.recipeCategory.forEach((cat) => {
+            if (!allCategories.value.includes(cat)) {
+                allCategories.value.push(cat);
+            }
+        });
 
         if (recipe.value.recipeYield === null) {
             showRecipeYield.value = false;
@@ -773,9 +793,13 @@ onMounted(() => {
             // eslint-disable-next-line prefer-destructuring
             allCategories.value[idx] = val[0];
         }
-        // Update selected category if the currently selected was renamed
-        if (recipe.value.recipeCategory === val[1]) {
-            // eslint-disable-next-line prefer-destructuring
+        // Update selected categories if the renamed one is in the selection
+        if (Array.isArray(recipe.value.recipeCategory)) {
+            const catIdx = recipe.value.recipeCategory.indexOf(val[1]);
+            if (catIdx >= 0) {
+                recipe.value.recipeCategory[catIdx] = val[0];
+            }
+        } else if (recipe.value.recipeCategory === val[1]) {
             recipe.value.recipeCategory = val[0];
         }
     });

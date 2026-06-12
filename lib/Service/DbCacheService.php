@@ -210,9 +210,7 @@ class DbCacheService {
 		foreach ($recipeIds as $rid) {
 			// XXX Enhancement by selecting all keywords/categories and associating in RAM into data structure
 			$this->dbKeywords[$rid] = $this->db->getKeywordsOfRecipe($rid, $this->userId);
-			$category = $this->db->getCategoryOfRecipe($rid, $this->userId);
-
-			$this->dbCategories[$rid] = $category;
+			$this->dbCategories[$rid] = $this->db->getCategoriesOfRecipe($rid, $this->userId);
 		}
 	}
 
@@ -279,65 +277,55 @@ class DbCacheService {
 		$this->db->updateRecipes($updatedRecipes, $this->userId);
 	}
 
+	/**
+	 * Update categories using diff-based add/remove (multi-category support).
+	 * Mirrors the approach used in updateKeywords().
+	 */
 	private function updateCategories() {
+		$newPairs = [];
+		$obsoletePairs = [];
+
 		foreach ($this->jsonFiles as $rid => $json) {
-			if ($this->hasJSONCategory($json)) {
-				// There is a category in the JSON file present.
-
-				$category = trim($this->getJSONCategory($json));
-
-				if (isset($this->dbCategories[$rid])) {
-					// There is a category present. Update needed?
-					if ($this->dbCategories[$rid] !== trim($category)) {
-						$this->db->updateCategoryOfRecipe($rid, $category, $this->userId);
-					}
-				} else {
-					$this->db->addCategoryOfRecipe($rid, $category, $this->userId);
-				}
+			$textCategories = $json['recipeCategory'] ?? '';
+			if (is_array($textCategories)) {
+				$categories = $textCategories;
 			} else {
-				// There is no category in the JSON file present.
-				if (isset($this->dbCategories[$rid])) {
-					$this->db->removeCategoryOfRecipe($rid, $this->userId);
-				}
+				$categories = explode(',', $textCategories);
 			}
-		}
-	}
 
-	/**
-	 * @param array $json
-	 * @return bool
-	 */
-	private function hasJSONCategory(array $json): bool {
-		return !is_null($this->getJSONCategory($json));
-	}
+			$categories = array_map(function ($v) {
+				return trim($v);
+			}, $categories);
+			$categories = array_filter($categories, function ($v) {
+				return !empty($v);
+			});
+			$categories = array_values($categories);
 
-	/**
-	 * Get the category of a recipe.
-	 *
-	 * This will only return the very first category if there are multiple registered.
-	 *
-	 * @param array $json The recipe
-	 * @return string|null The category name of null if no category was found.
-	 */
-	private function getJSONCategory(array $json): ?string {
-		if (!isset($json['recipeCategory'])) {
-			return null;
-		}
+			$dbCategories = $this->dbCategories[$rid] ?? [];
 
-		$category = $json['recipeCategory'];
-		if (is_array($category)) {
-			if (count($category) > 0) {
-				$category = $category[0];
-			} else {
-				$category = null;
-			}
-		}
+			$onlyInDb = array_filter($dbCategories, function ($v) use ($categories) {
+				return !in_array($v, $categories);
+			});
+			$onlyInJSON = array_filter($categories, function ($v) use ($dbCategories) {
+				return !in_array($v, $dbCategories);
+			});
 
-		if (strlen(trim($category)) === 0) {
-			return null;
+			$newPairs = array_merge($newPairs, array_map(function ($cat) use ($rid) {
+				return [
+					'recipeId' => $rid,
+					'name' => $cat,
+				];
+			}, $onlyInJSON));
+			$obsoletePairs = array_merge($obsoletePairs, array_map(function ($cat) use ($rid) {
+				return [
+					'recipeId' => $rid,
+					'name' => $cat,
+				];
+			}, $onlyInDb));
 		}
 
-		return $category;
+		$this->db->addCategoryPairs($newPairs, $this->userId);
+		$this->db->removeCategoryPairs($obsoletePairs, $this->userId);
 	}
 
 	private function updateKeywords() {
