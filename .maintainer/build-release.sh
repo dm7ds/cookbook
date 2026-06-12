@@ -130,6 +130,13 @@ if ! grep -q "Multi-Category fork" "$WORK/cookbook/appinfo/info.xml"; then
         "$WORK/cookbook/appinfo/info.xml" 2>/dev/null || true
 fi
 
+# Fork-README ins Archiv (frisch von origin/multicategory, nicht der ausgecheckte Tag-Stand)
+git fetch origin multicategory --quiet 2>/dev/null || true
+if git show origin/multicategory:README.md > "$WORK/cookbook/README.md" 2>/dev/null \
+    || git show multicategory:README.md > "$WORK/cookbook/README.md" 2>/dev/null; then
+    info "Fork-README ins Archiv gelegt."
+fi
+
 # --- 4. NEU PACKEN ---
 echo ""; step "Release-Archiv packen..."
 ARCHIVE="${OUT_DIR}/cookbook-${VER}-mc${MC}.tar.gz"
