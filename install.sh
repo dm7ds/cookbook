@@ -103,7 +103,10 @@ ASSET_URL="$(curl -fsSL "https://api.github.com/repos/${GH_REPO}/releases/tags/$
     | grep -oP '"browser_download_url":\s*"\K[^"]+\.tar\.gz' | head -1)"
 [[ -n "$ASSET_URL" ]] || die "Kein .tar.gz-Asset in Release $REL_TAG gefunden."
 curl -fsSL "$ASSET_URL" -o "$TMP/cookbook.tar.gz"
-tar tzf "$TMP/cookbook.tar.gz" | grep -q "^cookbook/appinfo/info.xml" || die "Archiv sieht nicht wie eine Cookbook-App aus."
+# tar-Liste erst in Datei schreiben, dann grep — vermeidet pipefail+SIGPIPE-Falle
+# (grep -q schließt die Pipe früh, tar bekommt SIGPIPE, pipefail würde das als Fehler werten)
+tar tzf "$TMP/cookbook.tar.gz" > "$TMP/filelist.txt" 2>/dev/null || die "Archiv ist kein gültiges tar.gz."
+grep -q "^cookbook/appinfo/info.xml" "$TMP/filelist.txt" || die "Archiv sieht nicht wie eine Cookbook-App aus."
 info "Heruntergeladen ($(du -h "$TMP/cookbook.tar.gz" | cut -f1))."
 
 # --- Backup ---
