@@ -10,8 +10,12 @@
 
 ## Was ist das?
 
-Ein Fork von [nextcloud/cookbook](https://github.com/nextcloud/cookbook) mit **einer** funktionalen
-Änderung: Rezepte können **mehreren Kategorien** zugewiesen werden, statt nur einer.
+Ein Fork von [nextcloud/cookbook](https://github.com/nextcloud/cookbook) mit einer Änderung:
+Rezepte können **mehreren Kategorien** zugewiesen werden, statt nur einer.
+
+- **Editor:** Das Kategorie-Feld ist ein Multi-Select — beliebig viele Kategorien pro Rezept.
+- **Rezept-Ansicht:** Die Kategorien erscheinen als dezent getönte, klickbare Chips direkt unter
+  dem Rezeptnamen (über den Keywords). Klick führt zur jeweiligen Kategorie-Übersicht.
 
 Alles andere ist die unveränderte, offizielle Cookbook-App. Wir ziehen jede neue Upstream-Version,
 legen den Patch drüber, bauen ein fertiges Archiv und veröffentlichen es als Release — **du musst
@@ -49,13 +53,17 @@ nach `apps/` (bzw. `custom_apps/`) entpacken, `occ app:enable cookbook`.
 
 ## Der Patch
 
-Genau vier Dateien (Branch [`multicategory`](https://github.com/dm7ds/cookbook/tree/multicategory),
+Fünf Dateien (Branch [`multicategory`](https://github.com/dm7ds/cookbook/tree/multicategory),
 ein Commit auf dem jeweiligen Upstream-Tag):
 
 - `lib/Db/RecipeDb.php` — Multi-Category-DB-Operationen
 - `lib/Service/DbCacheService.php` — diff-basiertes Category-Update
 - `lib/Helper/Filter/JSON/CleanCategoryFilter.php` — Kategorie-Array nicht auf eins reduzieren
-- `src/components/RecipeEdit.vue` — Multi-Select-UI
+- `src/components/RecipeEdit.vue` — Multi-Select-UI im Editor
+- `src/components/RecipeView/RecipeView.vue` — Kategorie-Chips in der Rezept-Ansicht
+
+Die komplette Fork-Infrastruktur (Build-/Deploy-Scripts + Patch) liegt versioniert unter
+[`.maintainer/`](https://github.com/dm7ds/cookbook/tree/multicategory/.maintainer).
 
 ## Lizenz & Credits
 
