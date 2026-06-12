@@ -1,3 +1,24 @@
+> # 🍲 Fork mit Multi-Category-Support
+>
+> **Dies ist ein Fork von [nextcloud/cookbook](https://github.com/nextcloud/cookbook) der erlaubt, ein Rezept mehreren Kategorien zuzuweisen.**
+>
+> Warum ein Fork? Weil das Upstream-Projekt dieses Feature **wiederholt abgelehnt** hat,
+> obwohl die Community es seit Jahren wünscht und schema.org `recipeCategory` ausdrücklich
+> als Liste erlaubt:
+>
+> - **#277** (2020) „Multiple categories for each recipe" — geschlossen, nie umgesetzt
+> - **#2605** „Allow for multiple categories" — offen, ignoriert
+> - **#2550 / #3018** „mehrere wählbar, nur eine gespeichert" — als *COMPLETED* geschlossen,
+>   indem mit **PR #3080 „Do not allow multiple categories in the frontend"** (2026-04-02)
+>   das Multi-Select **absichtlich entfernt** wurde, statt das Backend zu reparieren.
+>
+> Wenn man ein sinnvolles Feature lange genug ablehnt, baut es eben jemand selbst.
+> Der Patch ist offen, dokumentiert und reproduzierbar — der Branch [`multicategory`](../../tree/multicategory)
+> enthält genau einen Commit auf [`v0.11.6`](https://github.com/nextcloud/cookbook/releases/tag/v0.11.6).
+> Falls beim Upstream doch mal jemand Lust bekommt: gern.
+>
+> ---
+
 <div align="center">
 
 <img src="docs/assets/icon256x256.png#gh-dark-mode-only" alt="Nextcloud Cookbook icon" width="100"/>
