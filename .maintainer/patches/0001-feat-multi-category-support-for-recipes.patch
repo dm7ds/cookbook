@@ -1,0 +1,527 @@
+From 52ac936cc4b5f0ce59fd88a7f43339ad76f49926 Mon Sep 17 00:00:00 2001
+From: Planlos <mail@planlos.net>
+Date: Fri, 12 Jun 2026 16:03:26 +0200
+Subject: [PATCH] feat: multi-category support for recipes
+
+Allows assigning a recipe to multiple categories instead of just one.
+
+Backend:
+- RecipeDb.php: multi-category DB operations
+- DbCacheService.php: diff-based category update
+- CleanCategoryFilter.php: keep category array instead of reducing to one
+
+Frontend:
+- RecipeEdit.vue: multi-select UI for categories
+
+Patched against upstream v0.11.6. Upstream rejects this feature
+(PR #3080 actively removed multi-select), so maintained as a private fork.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/Db/RecipeDb.php                           | 90 +++++++++++++++++-
+ .../Filter/JSON/CleanCategoryFilter.php       | 32 +++++--
+ lib/Service/DbCacheService.php                | 92 ++++++++-----------
+ src/components/RecipeEdit.vue                 | 50 +++++++---
+ src/components/RecipeView/RecipeView.vue      | 61 ++++++++++++
+ 5 files changed, 249 insertions(+), 76 deletions(-)
+
+diff --git a/lib/Db/RecipeDb.php b/lib/Db/RecipeDb.php
+index f4c1d6be..1fe9410a 100755
+--- a/lib/Db/RecipeDb.php
++++ b/lib/Db/RecipeDb.php
+@@ -410,8 +410,25 @@ class RecipeDb {
+ 			if (!array_key_exists($recipe['recipe_id'], $recipesGroupedTags)) {
+ 				$recipesGroupedTags[$recipe['recipe_id']] = $recipe;
+ 			} else {
++				// Deduplicated keyword grouping
+ 				if (!is_null($recipe['keywords'])) {
+-					$recipesGroupedTags[$recipe['recipe_id']]['keywords'] .= ',' . $recipe['keywords'];
++					$existing = $recipesGroupedTags[$recipe['recipe_id']]['keywords'] ?? '';
++					$existingArr = $existing ? explode(',', $existing) : [];
++					if (!in_array($recipe['keywords'], $existingArr)) {
++						$recipesGroupedTags[$recipe['recipe_id']]['keywords'] .= ',' . $recipe['keywords'];
++					}
++				}
++				// Deduplicated category grouping (multi-category support)
++				if (isset($recipe['category']) && !is_null($recipe['category'])) {
++					$existing = $recipesGroupedTags[$recipe['recipe_id']]['category'] ?? '';
++					if (empty($existing)) {
++						$recipesGroupedTags[$recipe['recipe_id']]['category'] = $recipe['category'];
++					} else {
++						$existingArr = explode(',', $existing);
++						if (!in_array($recipe['category'], $existingArr)) {
++							$recipesGroupedTags[$recipe['recipe_id']]['category'] .= ',' . $recipe['category'];
++						}
++					}
+ 				}
+ 			}
+ 		}
+@@ -594,6 +611,28 @@ class RecipeDb {
+ 		}
+ 	}
+ 
++	/**
++	 * Get all categories of a recipe as array (multi-category support).
++	 */
++	public function getCategoriesOfRecipe(int $recipeId, string $userId): array {
++		$qb = $this->db->getQueryBuilder();
++
++		$qb->select('name')
++			->from(self::DB_TABLE_CATEGORIES)
++			->where('recipe_id = :rid', 'user_id = :uid');
++
++		$qb->setParameter('rid', $recipeId);
++		$qb->setParameter('uid', $userId);
++
++		$cursor = $qb->executeQuery();
++		$result = $cursor->fetchAll();
++		$cursor->closeCursor();
++
++		return array_map(function ($row) {
++			return $row['name'];
++		}, $result);
++	}
++
+ 	public function updateCategoryOfRecipe(int $recipeId, string $categoryName, string $userId) {
+ 		$qb = $this->db->getQueryBuilder();
+ 		$qb->update(self::DB_TABLE_CATEGORIES)
+@@ -660,6 +699,55 @@ class RecipeDb {
+ 		}
+ 	}
+ 
++	/**
++	 * Add multiple category rows (multi-category support).
++	 */
++	public function addCategoryPairs(array $pairs, string $userId) {
++		if (empty($pairs)) {
++			return;
++		}
++
++		$qb = $this->db->getQueryBuilder();
++		$qb->insert(self::DB_TABLE_CATEGORIES)
++			->values(['recipe_id' => ':rid', 'name' => ':name', 'user_id' => ':user']);
++		$qb->setParameter('user', $userId, Types::STRING);
++
++		foreach ($pairs as $p) {
++			$qb->setParameter('rid', $p['recipeId'], Types::INTEGER);
++			$qb->setParameter('name', $p['name'], Types::STRING);
++
++			try {
++				$qb->executeStatement();
++			} catch (\Exception $ex) {
++				// Skip conflicts
++			}
++		}
++	}
++
++	/**
++	 * Remove specific category rows (multi-category support).
++	 */
++	public function removeCategoryPairs(array $pairs, string $userId) {
++		if (empty($pairs)) {
++			return;
++		}
++
++		$qb = $this->db->getQueryBuilder();
++		$qb->delete(self::DB_TABLE_CATEGORIES);
++
++		foreach ($pairs as $p) {
++			$qb->orWhere(
++				$qb->expr()->andX(
++					$qb->expr()->eq('user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)),
++					$qb->expr()->eq('recipe_id', $qb->createNamedParameter($p['recipeId'], IQueryBuilder::PARAM_INT)),
++					$qb->expr()->eq('name', $qb->createNamedParameter($p['name'], IQueryBuilder::PARAM_STR))
++				)
++			);
++		}
++
++		$qb->executeStatement();
++	}
++
+ 	public function removeKeywordPairs(array $pairs, string $userId) {
+ 		if (empty($pairs)) {
+ 			return;
+diff --git a/lib/Helper/Filter/JSON/CleanCategoryFilter.php b/lib/Helper/Filter/JSON/CleanCategoryFilter.php
+index a6055eb9..55c69dd5 100644
+--- a/lib/Helper/Filter/JSON/CleanCategoryFilter.php
++++ b/lib/Helper/Filter/JSON/CleanCategoryFilter.php
+@@ -7,9 +7,10 @@ use OCA\Cookbook\Helper\TextCleanupHelper;
+ /**
+  * Clean the category of a recipe.
+  *
+- * A recipe must have at most one category.
+- * This category must be a string.
+- * Recipes without category are assigned the empty string for the category.
++ * Clean the categories of a recipe.
++ *
++ * A recipe may have multiple categories (comma-separated).
++ * Recipes without category are assigned the empty string.
+  */
+ class CleanCategoryFilter extends AbstractJSONFilter {
+ 	/** @var TextCleanupHelper */
+@@ -28,17 +29,28 @@ class CleanCategoryFilter extends AbstractJSONFilter {
+ 
+ 		$cache = $json['recipeCategory'];
+ 
++		// Support multiple categories: normalize to comma-separated string
+ 		if (is_array($json['recipeCategory'])) {
+-			reset($json['recipeCategory']);
+-			$json['recipeCategory'] = current($json['recipeCategory']);
+-		}
+-
+-		if (!is_string($json['recipeCategory'])) {
++			$categories = array_map(function ($cat) {
++				return is_string($cat) ? $this->textCleaner->cleanUp($cat, true, true) : '';
++			}, $json['recipeCategory']);
++			$categories = array_filter($categories, function ($cat) {
++				return strlen($cat) > 0;
++			});
++			$json['recipeCategory'] = implode(',', $categories);
++		} elseif (is_string($json['recipeCategory'])) {
++			$categories = array_map('trim', explode(',', $json['recipeCategory']));
++			$categories = array_map(function ($cat) {
++				return $this->textCleaner->cleanUp($cat, true, true);
++			}, $categories);
++			$categories = array_filter($categories, function ($cat) {
++				return strlen($cat) > 0;
++			});
++			$json['recipeCategory'] = implode(',', $categories);
++		} else {
+ 			$json['recipeCategory'] = '';
+ 		}
+ 
+-		$json['recipeCategory'] = $this->textCleaner->cleanUp($json['recipeCategory'], true, true);
+-
+ 		return $cache !== $json['recipeCategory'];
+ 	}
+ }
+diff --git a/lib/Service/DbCacheService.php b/lib/Service/DbCacheService.php
+index d8732836..77f2a65c 100644
+--- a/lib/Service/DbCacheService.php
++++ b/lib/Service/DbCacheService.php
+@@ -210,9 +210,7 @@ class DbCacheService {
+ 		foreach ($recipeIds as $rid) {
+ 			// XXX Enhancement by selecting all keywords/categories and associating in RAM into data structure
+ 			$this->dbKeywords[$rid] = $this->db->getKeywordsOfRecipe($rid, $this->userId);
+-			$category = $this->db->getCategoryOfRecipe($rid, $this->userId);
+-
+-			$this->dbCategories[$rid] = $category;
++			$this->dbCategories[$rid] = $this->db->getCategoriesOfRecipe($rid, $this->userId);
+ 		}
+ 	}
+ 
+@@ -279,65 +277,55 @@ class DbCacheService {
+ 		$this->db->updateRecipes($updatedRecipes, $this->userId);
+ 	}
+ 
++	/**
++	 * Update categories using diff-based add/remove (multi-category support).
++	 * Mirrors the approach used in updateKeywords().
++	 */
+ 	private function updateCategories() {
++		$newPairs = [];
++		$obsoletePairs = [];
++
+ 		foreach ($this->jsonFiles as $rid => $json) {
+-			if ($this->hasJSONCategory($json)) {
+-				// There is a category in the JSON file present.
+-
+-				$category = trim($this->getJSONCategory($json));
+-
+-				if (isset($this->dbCategories[$rid])) {
+-					// There is a category present. Update needed?
+-					if ($this->dbCategories[$rid] !== trim($category)) {
+-						$this->db->updateCategoryOfRecipe($rid, $category, $this->userId);
+-					}
+-				} else {
+-					$this->db->addCategoryOfRecipe($rid, $category, $this->userId);
+-				}
++			$textCategories = $json['recipeCategory'] ?? '';
++			if (is_array($textCategories)) {
++				$categories = $textCategories;
+ 			} else {
+-				// There is no category in the JSON file present.
+-				if (isset($this->dbCategories[$rid])) {
+-					$this->db->removeCategoryOfRecipe($rid, $this->userId);
+-				}
++				$categories = explode(',', $textCategories);
+ 			}
+-		}
+-	}
+ 
+-	/**
+-	 * @param array $json
+-	 * @return bool
+-	 */
+-	private function hasJSONCategory(array $json): bool {
+-		return !is_null($this->getJSONCategory($json));
+-	}
++			$categories = array_map(function ($v) {
++				return trim($v);
++			}, $categories);
++			$categories = array_filter($categories, function ($v) {
++				return !empty($v);
++			});
++			$categories = array_values($categories);
+ 
+-	/**
+-	 * Get the category of a recipe.
+-	 *
+-	 * This will only return the very first category if there are multiple registered.
+-	 *
+-	 * @param array $json The recipe
+-	 * @return string|null The category name of null if no category was found.
+-	 */
+-	private function getJSONCategory(array $json): ?string {
+-		if (!isset($json['recipeCategory'])) {
+-			return null;
+-		}
++			$dbCategories = $this->dbCategories[$rid] ?? [];
+ 
+-		$category = $json['recipeCategory'];
+-		if (is_array($category)) {
+-			if (count($category) > 0) {
+-				$category = $category[0];
+-			} else {
+-				$category = null;
+-			}
+-		}
++			$onlyInDb = array_filter($dbCategories, function ($v) use ($categories) {
++				return !in_array($v, $categories);
++			});
++			$onlyInJSON = array_filter($categories, function ($v) use ($dbCategories) {
++				return !in_array($v, $dbCategories);
++			});
+ 
+-		if (strlen(trim($category)) === 0) {
+-			return null;
++			$newPairs = array_merge($newPairs, array_map(function ($cat) use ($rid) {
++				return [
++					'recipeId' => $rid,
++					'name' => $cat,
++				];
++			}, $onlyInJSON));
++			$obsoletePairs = array_merge($obsoletePairs, array_map(function ($cat) use ($rid) {
++				return [
++					'recipeId' => $rid,
++					'name' => $cat,
++				];
++			}, $onlyInDb));
+ 		}
+ 
+-		return $category;
++		$this->db->addCategoryPairs($newPairs, $this->userId);
++		$this->db->removeCategoryPairs($obsoletePairs, $this->userId);
+ 	}
+ 
+ 	private function updateKeywords() {
+diff --git a/src/components/RecipeEdit.vue b/src/components/RecipeEdit.vue
+index 11df3ba2..eea96baa 100644
+--- a/src/components/RecipeEdit.vue
++++ b/src/components/RecipeEdit.vue
+@@ -48,11 +48,11 @@
+             />
+             <EditMultiselect
+                 v-model="recipe['recipeCategory']"
+-                :field-label="t('cookbook', 'Category')"
+-                :placeholder="t('cookbook', 'Choose category')"
++                :field-label="t('cookbook', 'Categories')"
++                :placeholder="t('cookbook', 'Choose categories')"
+                 :options="allCategories"
+                 :taggable="true"
+-                :multiple="false"
++                :multiple="true"
+                 :loading="isFetchingCategories"
+                 @tag="addCategory"
+             />
+@@ -208,7 +208,7 @@ const recipe = ref({
+     prepTime: '',
+     cookTime: '',
+     totalTime: '',
+-    recipeCategory: '',
++    recipeCategory: [],
+     keywords: '',
+     recipeYield: '',
+     tool: [],
+@@ -345,7 +345,12 @@ const overlayVisible = computed(
+         legacyStore.loadingRecipe ||
+         legacyStore.reloadingRecipe ||
+         (legacyStore.categoryUpdating &&
+-            legacyStore.categoryUpdating === recipe.value.recipeCategory),
++            (Array.isArray(recipe.value.recipeCategory)
++                ? recipe.value.recipeCategory.includes(
++                      legacyStore.categoryUpdating,
++                  )
++                : legacyStore.categoryUpdating ===
++                  recipe.value.recipeCategory)),
+ );
+ const recipeWithoutValueInit = computed(() => {
+     const r = { ...recipe.value };
+@@ -415,7 +420,10 @@ watch(
+  */
+ const addCategory = (newCategory) => {
+     allCategories.value.push(newCategory);
+-    recipe.value.recipeCategory = newCategory;
++    if (!Array.isArray(recipe.value.recipeCategory)) {
++        recipe.value.recipeCategory = [];
++    }
++    recipe.value.recipeCategory.push(newCategory);
+ };
+ /**
+  * Add newly created keyword.
+@@ -550,7 +558,7 @@ const initEmptyRecipe = () => {
+         prepTime: '',
+         cookTime: '',
+         totalTime: '',
+-        recipeCategory: '',
++        recipeCategory: [],
+         keywords: '',
+         recipeYield: '',
+         tool: [],
+@@ -629,11 +637,23 @@ const setup = async () => {
+             }
+         });
+ 
+-        // fallback if fetching all categories fails
+-        if (!allCategories.value.includes(recipe.value.recipeCategory)) {
+-            allCategories.value.push(recipe.value.recipeCategory);
++        // Normalize recipeCategory to array (API returns comma-separated string)
++        if (typeof recipe.value.recipeCategory === 'string') {
++            recipe.value.recipeCategory = recipe.value.recipeCategory
++                .split(',')
++                .map((c) => c.trim())
++                .filter((c) => c !== '');
++        } else if (!Array.isArray(recipe.value.recipeCategory)) {
++            recipe.value.recipeCategory = [];
+         }
+ 
++        // fallback if fetching all categories fails
++        recipe.value.recipeCategory.forEach((cat) => {
++            if (!allCategories.value.includes(cat)) {
++                allCategories.value.push(cat);
++            }
++        });
++
+         if (recipe.value.recipeYield === null) {
+             showRecipeYield.value = false;
+         } else if (!recipe.value.recipeYield) {
+@@ -777,9 +797,13 @@ onMounted(() => {
+             // eslint-disable-next-line prefer-destructuring
+             allCategories.value[idx] = val[0];
+         }
+-        // Update selected category if the currently selected was renamed
+-        if (recipe.value.recipeCategory === val[1]) {
+-            // eslint-disable-next-line prefer-destructuring
++        // Update selected categories if the renamed one is in the selection
++        if (Array.isArray(recipe.value.recipeCategory)) {
++            const catIdx = recipe.value.recipeCategory.indexOf(val[1]);
++            if (catIdx >= 0) {
++                recipe.value.recipeCategory[catIdx] = val[0];
++            }
++        } else if (recipe.value.recipeCategory === val[1]) {
+             recipe.value.recipeCategory = val[0];
+         }
+     });
+diff --git a/src/components/RecipeView/RecipeView.vue b/src/components/RecipeView/RecipeView.vue
+index a677f033..d7c18645 100644
+--- a/src/components/RecipeView/RecipeView.vue
++++ b/src/components/RecipeView/RecipeView.vue
+@@ -19,6 +19,23 @@
+                 <div class="meta">
+                     <h2 class="heading">{{ legacyStore.recipe.name }}</h2>
+                     <div class="details">
++                        <ul
++                            v-if="recipe.categories.length"
++                            class="recipe-categories"
++                        >
++                            <li
++                                v-for="(category, idx) in recipe.categories"
++                                :key="'cat' + idx"
++                                class="category-chip"
++                                :title="
++                                    /* prettier-ignore */
++                                    t('cookbook','Show all recipes in this category')
++                                "
++                                @click="categoryClicked(category)"
++                            >
++                                {{ category }}
++                            </li>
++                        </ul>
+                         <div v-if="recipe.keywords.length">
+                             <ul v-if="recipe.keywords.length">
+                                 <RecipeKeyword
+@@ -432,6 +449,7 @@ const recipe = computed(() => {
+         description: '',
+         ingredients: [],
+         instructions: [],
++        categories: [],
+         keywords: [],
+         timerCook: null,
+         timerPrep: null,
+@@ -465,6 +483,13 @@ const recipe = computed(() => {
+         ).map((i) => helpers.escapeHTML(i));
+     }
+ 
++    if (legacyStore.recipe.recipeCategory) {
++        const rc = legacyStore.recipe.recipeCategory;
++        tmpRecipe.categories = (Array.isArray(rc) ? rc : String(rc).split(','))
++            .map((c) => c.trim())
++            .filter((c) => c !== '');
++    }
++
+     if (legacyStore.recipe.keywords) {
+         tmpRecipe.keywords = String(legacyStore.recipe.keywords).split(',');
+     }
+@@ -603,6 +628,15 @@ const keywordClicked = (keyword) => {
+     }
+ };
+ 
++/**
++ * Callback for click on category
++ */
++const categoryClicked = (category) => {
++    if (category) {
++        router.push(`/category/${category}`);
++    }
++};
++
+ const setup = async () => {
+     isLoading.value = true;
+ 
+@@ -904,6 +938,33 @@ export default {
+     margin-top: 12px;
+ }
+ 
++.recipe-categories {
++    list-style: none;
++    padding: 0;
++    margin: 0.4em 0 0.2em;
++    line-height: 1.9;
++}
++
++.category-chip {
++    display: inline-block;
++    padding: 0.1em 0.7em;
++    margin-inline-end: 0.4em;
++    margin-bottom: 0.3em;
++    border-radius: var(--border-radius-pill);
++    background-color: var(--color-primary-element-light);
++    color: var(--color-main-text);
++    font-size: 0.95em;
++    font-weight: 500;
++    cursor: pointer;
++    user-select: none;
++    transition: background-color 0.1s ease-in-out;
++}
++
++.category-chip:hover {
++    background-color: var(--color-primary-element);
++    color: var(--color-primary-element-text);
++}
++
+ .dates {
+     font-size: 0.9em;
+ }
+-- 
+2.52.0.windows.1
+
