@@ -7,9 +7,10 @@ use OCA\Cookbook\Helper\TextCleanupHelper;
 /**
  * Clean the category of a recipe.
  *
- * A recipe must have at most one category.
- * This category must be a string.
- * Recipes without category are assigned the empty string for the category.
+ * Clean the categories of a recipe.
+ *
+ * A recipe may have multiple categories (comma-separated).
+ * Recipes without category are assigned the empty string.
  */
 class CleanCategoryFilter extends AbstractJSONFilter {
 	/** @var TextCleanupHelper */
@@ -28,16 +29,27 @@ class CleanCategoryFilter extends AbstractJSONFilter {
 
 		$cache = $json['recipeCategory'];
 
+		// Support multiple categories: normalize to comma-separated string
 		if (is_array($json['recipeCategory'])) {
-			reset($json['recipeCategory']);
-			$json['recipeCategory'] = current($json['recipeCategory']);
-		}
-
-		if (!is_string($json['recipeCategory'])) {
+			$categories = array_map(function ($cat) {
+				return is_string($cat) ? $this->textCleaner->cleanUp($cat, true, true) : '';
+			}, $json['recipeCategory']);
+			$categories = array_filter($categories, function ($cat) {
+				return strlen($cat) > 0;
+			});
+			$json['recipeCategory'] = implode(',', $categories);
+		} elseif (is_string($json['recipeCategory'])) {
+			$categories = array_map('trim', explode(',', $json['recipeCategory']));
+			$categories = array_map(function ($cat) {
+				return $this->textCleaner->cleanUp($cat, true, true);
+			}, $categories);
+			$categories = array_filter($categories, function ($cat) {
+				return strlen($cat) > 0;
+			});
+			$json['recipeCategory'] = implode(',', $categories);
+		} else {
 			$json['recipeCategory'] = '';
 		}
-
-		$json['recipeCategory'] = $this->textCleaner->cleanUp($json['recipeCategory'], true, true);
 
 		return $cache !== $json['recipeCategory'];
 	}

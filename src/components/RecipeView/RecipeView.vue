@@ -19,6 +19,23 @@
                 <div class="meta">
                     <h2 class="heading">{{ legacyStore.recipe.name }}</h2>
                     <div class="details">
+                        <ul
+                            v-if="recipe.categories.length"
+                            class="recipe-categories"
+                        >
+                            <li
+                                v-for="(category, idx) in recipe.categories"
+                                :key="'cat' + idx"
+                                class="category-chip"
+                                :title="
+                                    /* prettier-ignore */
+                                    t('cookbook','Show all recipes in this category')
+                                "
+                                @click="categoryClicked(category)"
+                            >
+                                {{ category }}
+                            </li>
+                        </ul>
                         <div v-if="recipe.keywords.length">
                             <ul v-if="recipe.keywords.length">
                                 <RecipeKeyword
@@ -432,6 +449,7 @@ const recipe = computed(() => {
         description: '',
         ingredients: [],
         instructions: [],
+        categories: [],
         keywords: [],
         timerCook: null,
         timerPrep: null,
@@ -463,6 +481,13 @@ const recipe = computed(() => {
         tmpRecipe.instructions = Object.values(
             legacyStore.recipe.recipeInstructions,
         ).map((i) => helpers.escapeHTML(i));
+    }
+
+    if (legacyStore.recipe.recipeCategory) {
+        const rc = legacyStore.recipe.recipeCategory;
+        tmpRecipe.categories = (Array.isArray(rc) ? rc : String(rc).split(','))
+            .map((c) => c.trim())
+            .filter((c) => c !== '');
     }
 
     if (legacyStore.recipe.keywords) {
@@ -600,6 +625,15 @@ const isNullOrEmpty = (str) =>
 const keywordClicked = (keyword) => {
     if (keyword) {
         router.push(`/tags/${keyword}`);
+    }
+};
+
+/**
+ * Callback for click on category
+ */
+const categoryClicked = (category) => {
+    if (category) {
+        router.push(`/category/${category}`);
     }
 };
 
@@ -902,6 +936,33 @@ export default {
 
 .heading {
     margin-top: 12px;
+}
+
+.recipe-categories {
+    list-style: none;
+    padding: 0;
+    margin: 0.4em 0 0.2em;
+    line-height: 1.9;
+}
+
+.category-chip {
+    display: inline-block;
+    padding: 0.1em 0.7em;
+    margin-inline-end: 0.4em;
+    margin-bottom: 0.3em;
+    border-radius: var(--border-radius-pill);
+    background-color: var(--color-primary-element-light);
+    color: var(--color-main-text);
+    font-size: 0.95em;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.category-chip:hover {
+    background-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 .dates {
