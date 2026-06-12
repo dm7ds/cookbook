@@ -14,7 +14,7 @@ export interface LegacyEditRecipe extends Recipe {
 	prepTime: string;
 	cookTime: string;
 	totalTime: string;
-	recipeCategory: string;
+	recipeCategory: string | string[];
 	keywords: string;
 	recipeYield: string | null;
 	tool: string[];

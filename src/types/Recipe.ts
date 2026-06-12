@@ -14,7 +14,8 @@ export interface Recipe {
 	prepTime?: string;
 	cookTime?: string;
 	totalTime?: string;
-	recipeCategory?: string;
+	recipeCategory?: string | string[];
+	categories?: string[];
 	category?: string;
 	keywords?: string | string[];
 	recipeYield?: string | number | null;
