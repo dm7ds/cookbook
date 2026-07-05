@@ -30,12 +30,13 @@ mit **Multi-Category-Support** (Rezepte mehreren Kategorien zuweisen).
 | `multicategory-patch/deploy-multicategory.sh` | Server-Deploy (Backup + Rollback + Cache-Clear), non-interaktiv via `ASSUME_YES=1` |
 | `multicategory-patch/migrate-keyword-to-category.php` | DB-Migration Keyword→Category (selten gebraucht) |
 
-## Der Patch = 4 Dateien
+## Der Patch = 5 Dateien
 
 - `lib/Db/RecipeDb.php` — Multi-Category DB-Operationen
 - `lib/Service/DbCacheService.php` — Diff-basiertes Category-Update
 - `lib/Helper/Filter/JSON/CleanCategoryFilter.php` — Kategorie-Array nicht auf 1 reduzieren
 - `src/components/RecipeEdit.vue` — Multi-Select-UI (wird zu `js/` kompiliert)
+- `src/components/RecipeView/RecipeView.vue` — Kategorie-Chips in der Rezept-Ansicht
 
 ## Updaten — der normale Fall
 
@@ -61,17 +62,18 @@ Das Script:
 
 Weitere Optionen: `--latest` (neuestes Upstream-Release), `--no-deploy` (nur bauen).
 
-## Wenn ein Konflikt kommt (der #3080-Fall)
+## Wenn ein Konflikt kommt (der #3080-Fall ist eingearbeitet)
 
-Sobald du auf eine Version ≥ dem #3080-Release gehst, fasst Upstream `RecipeEdit.vue`
-so an, dass der Patch nicht mehr sauber passt. Das Script **stoppt hart** und zeigt:
+Der #3080-Fall (Upstream entfernt das Multi-Select aus `RecipeEdit.vue`) ist im Patch
+**bereits gelöst** — der Patch passt sauber auf v0.11.7. Falls ein *künftiger* Upstream-Change
+erneut kollidiert, stoppt das Script hart. Auflösen:
 
 ```
 cd source
 # Konflikte in den genannten Dateien manuell auflösen, dann:
 git add <dateien> && git am --continue
-# Patch neu exportieren, damit der Fix dauerhaft drin ist:
-git format-patch v0.11.6..HEAD -o ../multicategory-patch/patches/
+# Patch neu exportieren, damit der Fix dauerhaft drin ist (<tag> = Ziel-Upstream-Version):
+git format-patch <tag>..HEAD -o ../multicategory-patch/patches/
 # dann ./cookbook-update.sh erneut starten
 ```
 
@@ -88,11 +90,22 @@ sudo ./deploy-multicategory.sh --rollback
 
 ## Off-Site-Backup
 
-Der komplette Patch ist auf GitHub gesichert: **dm7ds/cookbook** (privat),
-Branch `multicategory`, Tag `patch-base-v0.11.6`. Plus die `.patch`-Datei lokal.
-Selbst bei Totalverlust von `source/` ist die Logik reproduzierbar.
+Der komplette Patch ist auf GitHub gesichert: **dm7ds/cookbook**,
+Branch `multicategory`, Tags `patch-base-v0.11.6` und `patch-base-v0.11.7`. Plus die
+`.patch`-Datei lokal. Selbst bei Totalverlust von `source/` ist die Logik reproduzierbar.
+
+## Fertige Releases installieren (ohne Compile)
+
+Jede Upstream-Version wird als ein GitHub-Release `vX.Y.Z` (ohne Iterationssuffix)
+mit fertig gebautem Archiv veröffentlicht (`build-release.sh`). Auf dem Server:
+
+```bash
+sudo ./install.sh                    # neuestes Release
+sudo ./install.sh --version v0.11.7  # bestimmtes Release
+```
 
 ## Server
 
-`ssh -i ~/.ssh/server_ssh_key -p 2222 ubuntu@example.invalid`
-App: `/var/www/nextcloud/apps/cookbook/` · Backups: `/root/cookbook-backups/`
+Zugangsdaten (SSH-Host, Port, Key, URL, Pfade) liegen **lokal** in `SERVER.local.md`
+im Fork-Root — bewusst **nicht** im (öffentlichen) Repo. Standard-Pfade auf dem NC-Server:
+App `<nextcloud>/apps/cookbook/`, Backups `/root/cookbook-backups/`.

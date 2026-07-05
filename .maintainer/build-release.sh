@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Cookbook Multi-Category — Release-Builder  (läuft auf server)
+# Cookbook Multi-Category — Release-Builder  (läuft auf dem NC-Server)
 # =============================================================================
 # Baut ein FERTIG INSTALLIERBARES, gepatchtes Cookbook-App-Archiv und
 # veröffentlicht es als GitHub-Release bei dm7ds/cookbook.
@@ -13,13 +13,14 @@
 #   2. Patch auf die Source rebasen + js/ frisch bauen (git am + npm build)
 #   3. Die 3 Backend-PHP + das gebaute js/ INS offizielle Archiv legen
 #   4. Neu packen -> cookbook.tar.gz  (vollständige, gepatchte, installierbare App)
-#   5. GitHub-Release bei dm7ds/cookbook erstellen (Tag vX.Y.Z-mcN)
+#   5. GitHub-Release bei dm7ds/cookbook erstellen (Tag vX.Y.Z)
+#      Ein Release pro Upstream-Version. Re-Build derselben Version ersetzt
+#      (clobbert) das Asset — keine mc1/mc2/mc3-Iterationstags mehr.
 #
-# Usage (auf server, in ~/cookbook-fork):
-#   ./build-release.sh --to v0.11.6              # baut Release für 0.11.6
+# Usage (auf dem NC-Server, in ~/cookbook-fork):
+#   ./build-release.sh --to v0.11.7              # baut Release für 0.11.7
 #   ./build-release.sh --latest                  # neueste Upstream-Version
-#   ./build-release.sh --to v0.11.6 --no-publish # nur lokal bauen, kein GitHub-Release
-#   ./build-release.sh --to v0.11.6 --mc 2       # Patch-Iteration 2 (Default 1)
+#   ./build-release.sh --to v0.11.7 --no-publish # nur lokal bauen, kein GitHub-Release
 # =============================================================================
 
 set -euo pipefail
@@ -46,14 +47,13 @@ warn(){ echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die(){ echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 # --- ARGS ---
-TARGET=""; USE_LATEST=0; NO_PUBLISH=0; MC=1
+TARGET=""; USE_LATEST=0; NO_PUBLISH=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --to) TARGET="$2"; shift 2 ;;
         --to=*) TARGET="${1#*=}"; shift ;;
         --latest) USE_LATEST=1; shift ;;
         --no-publish) NO_PUBLISH=1; shift ;;
-        --mc) MC="$2"; shift 2 ;;
         -h|--help) grep -E '^#( |$)' "$0" | sed 's/^# \?//'; exit 0 ;;
         *) die "Unbekanntes Argument: $1" ;;
     esac
@@ -79,7 +79,7 @@ elif [[ "$USE_LATEST" == "1" ]]; then TAG="$(git tag -l 'v*' | sort -V | tail -1
 else die "Bitte --to vX.Y.Z oder --latest angeben."; fi
 git rev-parse "$TAG" >/dev/null 2>&1 || die "Tag $TAG fehlt."
 VER="${TAG#v}"
-RELEASE_TAG="${TAG}-mc${MC}"
+RELEASE_TAG="${TAG}"
 info "Upstream-Version: $VER  |  Release-Tag: $RELEASE_TAG"
 
 # --- 1. OFFIZIELLES ARCHIV ZIEHEN ---
@@ -139,7 +139,7 @@ fi
 
 # --- 4. NEU PACKEN ---
 echo ""; step "Release-Archiv packen..."
-ARCHIVE="${OUT_DIR}/cookbook-${VER}-mc${MC}.tar.gz"
+ARCHIVE="${OUT_DIR}/cookbook-${VER}.tar.gz"
 tar czf "$ARCHIVE" -C "$WORK" cookbook
 info "Release-Archiv: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 
@@ -161,17 +161,15 @@ gepatcht weil Upstream Multi-Category wiederholt ablehnt (#277, #2605, PR #3080)
 \`\`\`
 curl -fsSL https://raw.githubusercontent.com/${GH_REPO}/multicategory/install.sh | sudo bash
 \`\`\`
-oder Archiv \`cookbook-${VER}-mc${MC}.tar.gz\` herunterladen und nach \`apps/\` (bzw. \`custom_apps/\`) entpacken,
-dann \`occ app:enable cookbook\`.
-
-Patch-Iteration: mc${MC}."
+oder Archiv \`cookbook-${VER}.tar.gz\` herunterladen und nach \`apps/\` (bzw. \`custom_apps/\`) entpacken,
+dann \`occ app:enable cookbook\`."
 
 if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
     warn "Release $RELEASE_TAG existiert — lade Archiv neu hoch."
     gh release upload "$RELEASE_TAG" "$ARCHIVE" --repo "$GH_REPO" --clobber
 else
     gh release create "$RELEASE_TAG" "$ARCHIVE" --repo "$GH_REPO" \
-        --title "Cookbook v${VER} + Multi-Category (mc${MC})" --notes "$NOTES"
+        --title "Cookbook v${VER} + Multi-Category" --notes "$NOTES"
 fi
 info "============================================================"
 info "  RELEASE VERÖFFENTLICHT: $RELEASE_TAG"

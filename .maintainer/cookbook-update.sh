@@ -40,7 +40,7 @@ set -euo pipefail
 # --- KONFIGURATION ---
 NC_PATH="${NC_PATH:-/var/www/nextcloud}"
 WEB_USER="${WEB_USER:-www-data}"
-NC_URL="${NC_URL:-https://cloud.example.invalid}"
+NC_URL="${NC_URL:-}"   # per Env setzen, z.B. NC_URL=https://<nextcloud-host>  (nicht im Repo)
 
 # Tools liegen im Script-Verzeichnis, das Repo darunter in source/
 FORK_DIR="${FORK_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
