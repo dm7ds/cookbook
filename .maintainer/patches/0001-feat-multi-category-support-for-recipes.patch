@@ -1,4 +1,4 @@
-From 52ac936cc4b5f0ce59fd88a7f43339ad76f49926 Mon Sep 17 00:00:00 2001
+From 7438fbec8edc175473e5c007acd8491acecb5cc2 Mon Sep 17 00:00:00 2001
 From: Maintainer <mail@example.invalid>
 Date: Fri, 12 Jun 2026 16:03:26 +0200
 Subject: [PATCH] feat: multi-category support for recipes
@@ -21,15 +21,17 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
  lib/Db/RecipeDb.php                           | 90 +++++++++++++++++-
  .../Filter/JSON/CleanCategoryFilter.php       | 32 +++++--
  lib/Service/DbCacheService.php                | 92 ++++++++-----------
- src/components/RecipeEdit.vue                 | 50 +++++++---
+ src/components/RecipeEdit.vue                 | 49 +++++++---
  src/components/RecipeView/RecipeView.vue      | 61 ++++++++++++
- 5 files changed, 249 insertions(+), 76 deletions(-)
+ src/types/LegacyEditRecipe.ts                 |  2 +-
+ src/types/Recipe.ts                           |  3 +-
+ 7 files changed, 252 insertions(+), 77 deletions(-)
 
 diff --git a/lib/Db/RecipeDb.php b/lib/Db/RecipeDb.php
-index f4c1d6be..1fe9410a 100755
+index f5ecf2eed..1310d986e 100755
 --- a/lib/Db/RecipeDb.php
 +++ b/lib/Db/RecipeDb.php
-@@ -410,8 +410,25 @@ class RecipeDb {
+@@ -414,8 +414,25 @@ class RecipeDb {
  			if (!array_key_exists($recipe['recipe_id'], $recipesGroupedTags)) {
  				$recipesGroupedTags[$recipe['recipe_id']] = $recipe;
  			} else {
@@ -56,7 +58,7 @@ index f4c1d6be..1fe9410a 100755
  				}
  			}
  		}
-@@ -594,6 +611,28 @@ class RecipeDb {
+@@ -598,6 +615,28 @@ class RecipeDb {
  		}
  	}
  
@@ -85,7 +87,7 @@ index f4c1d6be..1fe9410a 100755
  	public function updateCategoryOfRecipe(int $recipeId, string $categoryName, string $userId) {
  		$qb = $this->db->getQueryBuilder();
  		$qb->update(self::DB_TABLE_CATEGORIES)
-@@ -660,6 +699,55 @@ class RecipeDb {
+@@ -664,6 +703,55 @@ class RecipeDb {
  		}
  	}
  
@@ -142,10 +144,10 @@ index f4c1d6be..1fe9410a 100755
  		if (empty($pairs)) {
  			return;
 diff --git a/lib/Helper/Filter/JSON/CleanCategoryFilter.php b/lib/Helper/Filter/JSON/CleanCategoryFilter.php
-index a6055eb9..55c69dd5 100644
+index b22077e67..d02c51db1 100644
 --- a/lib/Helper/Filter/JSON/CleanCategoryFilter.php
 +++ b/lib/Helper/Filter/JSON/CleanCategoryFilter.php
-@@ -7,9 +7,10 @@ use OCA\Cookbook\Helper\TextCleanupHelper;
+@@ -11,9 +11,10 @@ use OCA\Cookbook\Helper\TextCleanupHelper;
  /**
   * Clean the category of a recipe.
   *
@@ -159,7 +161,7 @@ index a6055eb9..55c69dd5 100644
   */
  class CleanCategoryFilter extends AbstractJSONFilter {
  	/** @var TextCleanupHelper */
-@@ -28,17 +29,28 @@ class CleanCategoryFilter extends AbstractJSONFilter {
+@@ -32,17 +33,28 @@ class CleanCategoryFilter extends AbstractJSONFilter {
  
  		$cache = $json['recipeCategory'];
  
@@ -196,10 +198,10 @@ index a6055eb9..55c69dd5 100644
  	}
  }
 diff --git a/lib/Service/DbCacheService.php b/lib/Service/DbCacheService.php
-index d8732836..77f2a65c 100644
+index bd10730be..d1c11e1a0 100644
 --- a/lib/Service/DbCacheService.php
 +++ b/lib/Service/DbCacheService.php
-@@ -210,9 +210,7 @@ class DbCacheService {
+@@ -214,9 +214,7 @@ class DbCacheService {
  		foreach ($recipeIds as $rid) {
  			// XXX Enhancement by selecting all keywords/categories and associating in RAM into data structure
  			$this->dbKeywords[$rid] = $this->db->getKeywordsOfRecipe($rid, $this->userId);
@@ -210,7 +212,7 @@ index d8732836..77f2a65c 100644
  		}
  	}
  
-@@ -279,65 +277,55 @@ class DbCacheService {
+@@ -283,65 +281,55 @@ class DbCacheService {
  		$this->db->updateRecipes($updatedRecipes, $this->userId);
  	}
  
@@ -316,10 +318,10 @@ index d8732836..77f2a65c 100644
  
  	private function updateKeywords() {
 diff --git a/src/components/RecipeEdit.vue b/src/components/RecipeEdit.vue
-index 11df3ba2..eea96baa 100644
+index 041aef7e9..36d0fe7d9 100644
 --- a/src/components/RecipeEdit.vue
 +++ b/src/components/RecipeEdit.vue
-@@ -48,11 +48,11 @@
+@@ -54,11 +54,11 @@ SPDX-License-Identifier: AGPL-3.0-only OR AGPL-3.0-or-later
              />
              <EditMultiselect
                  v-model="recipe['recipeCategory']"
@@ -334,7 +336,7 @@ index 11df3ba2..eea96baa 100644
                  :loading="isFetchingCategories"
                  @tag="addCategory"
              />
-@@ -208,7 +208,7 @@ const recipe = ref({
+@@ -214,7 +214,7 @@ const recipe = ref<LegacyEditRecipe>({
      prepTime: '',
      cookTime: '',
      totalTime: '',
@@ -343,7 +345,7 @@ index 11df3ba2..eea96baa 100644
      keywords: '',
      recipeYield: '',
      tool: [],
-@@ -345,7 +345,12 @@ const overlayVisible = computed(
+@@ -364,7 +364,12 @@ const overlayVisible = computed(
          legacyStore.loadingRecipe ||
          legacyStore.reloadingRecipe ||
          (legacyStore.categoryUpdating &&
@@ -357,9 +359,9 @@ index 11df3ba2..eea96baa 100644
  );
  const recipeWithoutValueInit = computed(() => {
      const r = { ...recipe.value };
-@@ -415,7 +420,10 @@ watch(
+@@ -420,7 +425,10 @@ watch(
   */
- const addCategory = (newCategory) => {
+ const addCategory = (newCategory: string) => {
      allCategories.value.push(newCategory);
 -    recipe.value.recipeCategory = newCategory;
 +    if (!Array.isArray(recipe.value.recipeCategory)) {
@@ -369,7 +371,7 @@ index 11df3ba2..eea96baa 100644
  };
  /**
   * Add newly created keyword.
-@@ -550,7 +558,7 @@ const initEmptyRecipe = () => {
+@@ -569,7 +577,7 @@ const initEmptyRecipe = () => {
          prepTime: '',
          cookTime: '',
          totalTime: '',
@@ -378,7 +380,7 @@ index 11df3ba2..eea96baa 100644
          keywords: '',
          recipeYield: '',
          tool: [],
-@@ -629,11 +637,23 @@ const setup = async () => {
+@@ -616,11 +624,23 @@ const setup = async () => {
              }
          });
  
@@ -405,13 +407,12 @@ index 11df3ba2..eea96baa 100644
          if (recipe.value.recipeYield === null) {
              showRecipeYield.value = false;
          } else if (!recipe.value.recipeYield) {
-@@ -777,9 +797,13 @@ onMounted(() => {
-             // eslint-disable-next-line prefer-destructuring
+@@ -776,8 +796,13 @@ onMounted(() => {
+         if (idx >= 0) {
              allCategories.value[idx] = val[0];
          }
 -        // Update selected category if the currently selected was renamed
 -        if (recipe.value.recipeCategory === val[1]) {
--            // eslint-disable-next-line prefer-destructuring
 +        // Update selected categories if the renamed one is in the selection
 +        if (Array.isArray(recipe.value.recipeCategory)) {
 +            const catIdx = recipe.value.recipeCategory.indexOf(val[1]);
@@ -423,15 +424,15 @@ index 11df3ba2..eea96baa 100644
          }
      });
 diff --git a/src/components/RecipeView/RecipeView.vue b/src/components/RecipeView/RecipeView.vue
-index a677f033..d7c18645 100644
+index 5920a6c21..e154193d2 100644
 --- a/src/components/RecipeView/RecipeView.vue
 +++ b/src/components/RecipeView/RecipeView.vue
-@@ -19,6 +19,23 @@
+@@ -25,6 +25,23 @@ SPDX-License-Identifier: AGPL-3.0-only OR AGPL-3.0-or-later
                  <div class="meta">
                      <h2 class="heading">{{ legacyStore.recipe.name }}</h2>
                      <div class="details">
 +                        <ul
-+                            v-if="recipe.categories.length"
++                            v-if="recipe.categories?.length"
 +                            class="recipe-categories"
 +                        >
 +                            <li
@@ -447,19 +448,19 @@ index a677f033..d7c18645 100644
 +                                {{ category }}
 +                            </li>
 +                        </ul>
-                         <div v-if="recipe.keywords.length">
-                             <ul v-if="recipe.keywords.length">
+                         <div v-if="recipe.keywords?.length">
+                             <ul v-if="recipe.keywords?.length">
                                  <RecipeKeyword
-@@ -432,6 +449,7 @@ const recipe = computed(() => {
+@@ -438,6 +455,7 @@ const recipe = computed<Recipe>(() => {
          description: '',
          ingredients: [],
          instructions: [],
 +        categories: [],
          keywords: [],
-         timerCook: null,
-         timerPrep: null,
-@@ -465,6 +483,13 @@ const recipe = computed(() => {
-         ).map((i) => helpers.escapeHTML(i));
+         timerCook: null as RecipeTimerValue | null,
+         timerPrep: null as RecipeTimerValue | null,
+@@ -471,6 +489,13 @@ const recipe = computed<Recipe>(() => {
+         ).map((i) => helpers.escapeHTML(String(i)));
      }
  
 +    if (legacyStore.recipe.recipeCategory) {
@@ -472,14 +473,14 @@ index a677f033..d7c18645 100644
      if (legacyStore.recipe.keywords) {
          tmpRecipe.keywords = String(legacyStore.recipe.keywords).split(',');
      }
-@@ -603,6 +628,15 @@ const keywordClicked = (keyword) => {
+@@ -612,6 +637,15 @@ const keywordClicked = (keyword: string) => {
      }
  };
  
 +/**
 + * Callback for click on category
 + */
-+const categoryClicked = (category) => {
++const categoryClicked = (category: string) => {
 +    if (category) {
 +        router.push(`/category/${category}`);
 +    }
@@ -488,7 +489,7 @@ index a677f033..d7c18645 100644
  const setup = async () => {
      isLoading.value = true;
  
-@@ -904,6 +938,33 @@ export default {
+@@ -952,6 +986,33 @@ export default {
      margin-top: 12px;
  }
  
@@ -522,6 +523,33 @@ index a677f033..d7c18645 100644
  .dates {
      font-size: 0.9em;
  }
+diff --git a/src/types/LegacyEditRecipe.ts b/src/types/LegacyEditRecipe.ts
+index 908622bf3..758f5b2f4 100644
+--- a/src/types/LegacyEditRecipe.ts
++++ b/src/types/LegacyEditRecipe.ts
+@@ -14,7 +14,7 @@ export interface LegacyEditRecipe extends Recipe {
+ 	prepTime: string;
+ 	cookTime: string;
+ 	totalTime: string;
+-	recipeCategory: string;
++	recipeCategory: string | string[];
+ 	keywords: string;
+ 	recipeYield: string | null;
+ 	tool: string[];
+diff --git a/src/types/Recipe.ts b/src/types/Recipe.ts
+index 4f3504b95..db77a3827 100644
+--- a/src/types/Recipe.ts
++++ b/src/types/Recipe.ts
+@@ -14,7 +14,8 @@ export interface Recipe {
+ 	prepTime?: string;
+ 	cookTime?: string;
+ 	totalTime?: string;
+-	recipeCategory?: string;
++	recipeCategory?: string | string[];
++	categories?: string[];
+ 	category?: string;
+ 	keywords?: string | string[];
+ 	recipeYield?: string | number | null;
 -- 
 2.52.0.windows.1
 

@@ -10,6 +10,7 @@ cookbook.tar.gz
 
 # Built js package
 js/*
+/css
 
 ### NPM ###
 

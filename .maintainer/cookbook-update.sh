@@ -163,13 +163,14 @@ fi
 info "Build..."; npm run build
 # Output-Verzeichnis: webpack UND vite bauen nach js/ (in dieser App konfiguriert)
 ls js/cookbook-main.* >/dev/null 2>&1 || die "Build erzeugte kein js/cookbook-main.* (Output-Pfad geändert? Build-System geprüft?)"
+ls css/cookbook-main.css >/dev/null 2>&1 || die "Build erzeugte kein css/cookbook-main.css"
 info "Build OK ($(ls js/ | wc -l) Dateien in js/)."
 
 # --- ARCHIV ---
 echo ""; step "Deploy-Archiv packen..."
 TMP="$(mktemp -d)"; trap "rm -rf '$TMP'" EXIT
 for f in "${PHP_FILES[@]}"; do mkdir -p "$TMP/$(dirname "$f")"; cp "$f" "$TMP/$f"; done
-cp -r js "$TMP/js"
+cp -r js "$TMP/js"; cp -r css "$TMP/css"   # JS lädt gehashte CSS-Chunks: beide aus demselben Build
 tar czf "$ARCHIVE" -C "$TMP" .
 info "Archiv: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 

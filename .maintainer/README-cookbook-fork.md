@@ -30,13 +30,16 @@ mit **Multi-Category-Support** (Rezepte mehreren Kategorien zuweisen).
 | `multicategory-patch/deploy-multicategory.sh` | Server-Deploy (Backup + Rollback + Cache-Clear), non-interaktiv via `ASSUME_YES=1` |
 | `multicategory-patch/migrate-keyword-to-category.php` | DB-Migration Keyword→Category (selten gebraucht) |
 
-## Der Patch = 5 Dateien
+## Der Patch = 7 Dateien (Stand v0.11.12)
 
 - `lib/Db/RecipeDb.php` — Multi-Category DB-Operationen
 - `lib/Service/DbCacheService.php` — Diff-basiertes Category-Update
 - `lib/Helper/Filter/JSON/CleanCategoryFilter.php` — Kategorie-Array nicht auf 1 reduzieren
 - `src/components/RecipeEdit.vue` — Multi-Select-UI (wird zu `js/` kompiliert)
 - `src/components/RecipeView/RecipeView.vue` — Kategorie-Chips in der Rezept-Ansicht
+- `src/types/Recipe.ts`, `src/types/LegacyEditRecipe.ts` — `recipeCategory` darf ein Array sein (seit v0.11.12 typisiert)
+
+Deploy legt `js/` **und** `css/` aus demselben Build auf den Server — das JS lädt CSS-Chunks mit Hash im Namen.
 
 ## Updaten — der normale Fall
 
@@ -91,7 +94,7 @@ sudo ./deploy-multicategory.sh --rollback
 ## Off-Site-Backup
 
 Der komplette Patch ist auf GitHub gesichert: **dm7ds/cookbook**,
-Branch `multicategory`, Tags `patch-base-v0.11.6` und `patch-base-v0.11.7`. Plus die
+Branch `multicategory`, Tags `patch-base-v0.11.6`, `patch-base-v0.11.7` und `patch-base-v0.11.12`. Plus die
 `.patch`-Datei lokal. Selbst bei Totalverlust von `source/` ist die Logik reproduzierbar.
 
 ## Fertige Releases installieren (ohne Compile)

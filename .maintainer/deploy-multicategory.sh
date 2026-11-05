@@ -81,15 +81,18 @@ if [[ "${1:-}" == "--rollback" ]]; then
         fi
     done
 
-    # JS-Dateien wiederherstellen
-    if [[ -d "${LATEST_BACKUP}/js" ]]; then
-        rm -rf "${COOKBOOK_PATH}/js"
-        cp -r "${LATEST_BACKUP}/js" "${COOKBOOK_PATH}/js"
-        info "JS-Verzeichnis wiederhergestellt."
-    fi
+    # Frontend (js/ + css/) wiederherstellen
+    for d in js css; do
+        if [[ -d "${LATEST_BACKUP}/${d}" ]]; then
+            rm -rf "${COOKBOOK_PATH:?}/${d}"
+            cp -r "${LATEST_BACKUP}/${d}" "${COOKBOOK_PATH}/${d}"
+            chown -R "${WEB_USER}:${WEB_USER}" "${COOKBOOK_PATH}/${d}"
+            info "${d}-Verzeichnis wiederhergestellt."
+        fi
+    done
 
     # Permissions
-    chown -R "${WEB_USER}:${WEB_USER}" "${COOKBOOK_PATH}/lib" "${COOKBOOK_PATH}/js"
+    chown -R "${WEB_USER}:${WEB_USER}" "${COOKBOOK_PATH}/lib"
 
     # Cache leeren
     if command -v php &>/dev/null; then
@@ -204,9 +207,13 @@ for f in \
     cp -v "${COOKBOOK_PATH}/${f}" "${BACKUP_PATH}/${f}"
 done
 
-# JS-Verzeichnis komplett sichern
-cp -r "${COOKBOOK_PATH}/js" "${BACKUP_PATH}/js"
-info "JS-Verzeichnis gesichert ($(du -sh "${BACKUP_PATH}/js" | cut -f1))"
+# Frontend (js/ + css/) komplett sichern — das JS lädt CSS-Chunks mit Hash im Namen
+for d in js css; do
+    if [[ -d "${COOKBOOK_PATH}/${d}" ]]; then
+        cp -r "${COOKBOOK_PATH}/${d}" "${BACKUP_PATH}/${d}"
+        info "${d}-Verzeichnis gesichert ($(du -sh "${BACKUP_PATH}/${d}" | cut -f1))"
+    fi
+done
 
 # Backup-Metadaten
 cat > "${BACKUP_PATH}/BACKUP_INFO.txt" <<METAEOF
@@ -239,9 +246,12 @@ info "PHP-Dateien gepatcht."
 
 # --- JS ERSETZEN ---
 info "=== Schritt 3/5: Frontend-Dateien ersetzen ==="
-rm -rf "${COOKBOOK_PATH}/js"
-cp -r "${TMP_DIR}/js" "${COOKBOOK_PATH}/js"
-info "JS-Verzeichnis ersetzt ($(ls "${COOKBOOK_PATH}/js" | wc -l) Dateien)"
+[[ -d "${TMP_DIR}/css" ]] || { error "Patch-Archiv ohne css/ — js/ und css/ müssen aus demselben Build kommen."; exit 1; }
+for d in js css; do
+    rm -rf "${COOKBOOK_PATH:?}/${d}"
+    cp -r "${TMP_DIR}/${d}" "${COOKBOOK_PATH}/${d}"
+    info "${d}-Verzeichnis ersetzt ($(ls "${COOKBOOK_PATH}/${d}" | wc -l) Dateien)"
+done
 
 # --- PERMISSIONS ---
 info "=== Schritt 4/5: Permissions setzen ==="
@@ -249,12 +259,12 @@ chown -R "${WEB_USER}:${WEB_USER}" \
     "${COOKBOOK_PATH}/lib/Helper/Filter/JSON/CleanCategoryFilter.php" \
     "${COOKBOOK_PATH}/lib/Db/RecipeDb.php" \
     "${COOKBOOK_PATH}/lib/Service/DbCacheService.php" \
-    "${COOKBOOK_PATH}/js"
+    "${COOKBOOK_PATH}/js" "${COOKBOOK_PATH}/css"
 chmod 644 \
     "${COOKBOOK_PATH}/lib/Helper/Filter/JSON/CleanCategoryFilter.php" \
     "${COOKBOOK_PATH}/lib/Db/RecipeDb.php" \
     "${COOKBOOK_PATH}/lib/Service/DbCacheService.php"
-find "${COOKBOOK_PATH}/js" -type f -exec chmod 644 {} \;
+find "${COOKBOOK_PATH}/js" "${COOKBOOK_PATH}/css" -type f -exec chmod 644 {} \;
 info "Permissions gesetzt."
 
 # --- CACHE LEEREN ---
