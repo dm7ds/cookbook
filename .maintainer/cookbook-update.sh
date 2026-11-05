@@ -100,7 +100,7 @@ fi
 
 # --- ZIEL-VERSION ---
 step "Upstream-Tags holen..."
-git fetch upstream --tags --quiet
+git fetch upstream --tags --force --quiet   # --force: Fork-Historie wurde umgeschrieben, alte Tags kollidieren sonst
 
 if [[ -n "$TARGET" ]]; then
     TAG="$TARGET"

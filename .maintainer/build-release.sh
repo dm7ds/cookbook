@@ -27,7 +27,11 @@ set -euo pipefail
 
 # --- KONFIG ---
 GH_REPO="${GH_REPO:-dm7ds/cookbook}"
-OFFICIAL_BASE="https://github.com/christianlupus-nextcloud/cookbook-releases/releases/download"
+# Offizielles Archiv: ab v0.11.11 als cookbook.tar.gz am Upstream-Release, davor im Release-Repo
+OFFICIAL_URLS=(
+    "https://github.com/nextcloud/cookbook/releases/download/{TAG}/cookbook.tar.gz"
+    "https://github.com/christianlupus-nextcloud/cookbook-releases/releases/download/{TAG}/cookbook-{VER}.tar.gz"
+)
 
 FORK_DIR="${FORK_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPO_DIR="${FORK_DIR}/source"
@@ -71,7 +75,8 @@ cd "$REPO_DIR"
 # Build-Artefakte (untracked js/css aus vorherigem Build) aufräumen, dann nur TRACKED-Änderungen prüfen
 git clean -fd js css >/dev/null 2>&1 || true
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] || die "Working tree hat ungespeicherte Änderungen an getrackten Dateien (git stash / checkout)."
-git fetch upstream --tags --quiet
+# --force: lokale Tags stammen aus der umgeschriebenen Fork-Historie und würden sonst kollidieren
+git fetch upstream --tags --force --quiet
 
 # Ziel-Tag
 if [[ -n "$TARGET" ]]; then TAG="$TARGET"
@@ -85,8 +90,15 @@ info "Upstream-Version: $VER  |  Release-Tag: $RELEASE_TAG"
 # --- 1. OFFIZIELLES ARCHIV ZIEHEN ---
 echo ""; step "Offizielles fertig-Archiv ziehen ($VER)..."
 WORK="$(mktemp -d)"; trap "rm -rf '$WORK'" EXIT
-OFFICIAL_URL="${OFFICIAL_BASE}/${TAG}/cookbook-${VER}.tar.gz"
-curl -fsSL "$OFFICIAL_URL" -o "$WORK/official.tar.gz" || die "Download fehlgeschlagen: $OFFICIAL_URL"
+OFFICIAL_URL=""
+for u in "${OFFICIAL_URLS[@]}"; do
+    u="${u//\{TAG\}/$TAG}"; u="${u//\{VER\}/$VER}"
+    if curl -fsSL "$u" -o "$WORK/official.tar.gz" 2>/dev/null; then OFFICIAL_URL="$u"; break; fi
+done
+[[ -n "$OFFICIAL_URL" ]] || die "Kein offizielles Archiv für $TAG gefunden (geprüft: ${OFFICIAL_URLS[*]})"
+info "Quelle: $OFFICIAL_URL"
+tar xzOf "$WORK/official.tar.gz" cookbook/appinfo/info.xml | grep -q "<version>${VER}</version>" \
+    || die "Offizielles Archiv hat nicht Version $VER."
 tar xzf "$WORK/official.tar.gz" -C "$WORK"
 [[ -d "$WORK/cookbook" ]] || die "Archiv enthält kein cookbook/ Verzeichnis."
 info "Offizielles Archiv entpackt ($(du -sh "$WORK/cookbook" | cut -f1))."
