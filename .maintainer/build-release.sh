@@ -122,7 +122,7 @@ info "Build OK ($(ls js/ | wc -l) Dateien)."
 echo ""; step "Patch über offizielles Archiv legen..."
 for f in "${PHP_FILES[@]}"; do
     [[ -f "$WORK/cookbook/$f" ]] || die "Zieldatei im offiziellen Archiv fehlt: $f"
-    cp "$f" "$WORK/cookbook/$f"
+    git show "HEAD:$f" > "$WORK/cookbook/$f"   # aus dem Commit, nicht Working Tree (autocrlf würde CRLF liefern)
 done
 rm -rf "$WORK/cookbook/js"
 cp -r js "$WORK/cookbook/js"
